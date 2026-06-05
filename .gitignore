@@ -1,0 +1,8 @@
+.env
+chroma_db/
+tickets/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
