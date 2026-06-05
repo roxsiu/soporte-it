@@ -95,6 +95,16 @@ it-copilot/
 3. IT-Copilot buscará en los manuales y te dará una solución paso a paso.
 4. El ticket se registrará automáticamente y podrás verlo en el panel izquierdo.
 
+## Dashboard
+
+La pestaña **📊 Dashboard** muestra en tiempo real:
+- Métricas de tickets: total, resueltos, escalados y tasa de resolución.
+- Gráfico de tickets por estado.
+- Gráfico de tickets por categoría.
+- Historial completo de tickets en tabla.
+
+Los datos se generan automáticamente con cada interacción en el chat y se almacenan en `tickets/tickets.json`.   
+
 ## Tecnologías
 
 | Componente | Tecnología |
