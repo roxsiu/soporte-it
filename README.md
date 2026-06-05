@@ -1,4 +1,4 @@
-# 🛠️ IT-Copilot
+# 🛠️ Soporte-IT
 
 **Agente Inteligente de Soporte TI Nivel 1 mediante RAG**
 
@@ -112,7 +112,7 @@ it-copilot/
 
 ## Autores
 
-- [Nombre 1]
-- [Nombre 2]
+- Roxana Siu Loo
+- Sebastian Rodriguez
 
 Proyecto Integrador · Diploma AI Engineer · DMC Institute · 2026
