@@ -6,13 +6,15 @@ arquitectura RAG y agente con herramientas (LangChain).
 
 Autores: [Nombres del equipo]
 Curso:   Proyecto Integrador - Diploma AI Engineer
-Fecha:   Junio 2026
+Fecha:   Julio 2026
 """
 
 import streamlit as st
 import os
 import json
 import uuid
+import time
+import re
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,13 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage
+from openai import (
+    AuthenticationError,
+    RateLimitError,
+    APITimeoutError,
+    APIConnectionError,
+    BadRequestError,
+)
 
 # ============================================================
 # CONFIGURACIÓN
@@ -41,8 +50,13 @@ MODELO_EMBEDDINGS = "text-embedding-3-small"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 TOP_K = 4
+DOMINIO_EMPRESA = "novatech.com"
 
-# Crear directorios necesarios si no existen
+# Costos por 1,000 tokens (USD) - GPT-4o-mini
+COSTO_INPUT_POR_1K = 0.00015
+COSTO_OUTPUT_POR_1K = 0.0006
+
+# Crear directorios necesarios
 Path(DIRECTORIO_TICKETS).mkdir(exist_ok=True)
 
 
@@ -50,19 +64,18 @@ Path(DIRECTORIO_TICKETS).mkdir(exist_ok=True)
 # PROMPT DEL SISTEMA
 # ============================================================
 
-SYSTEM_PROMPT = """Eres Soporte-IT, el asistente virtual de soporte técnico de Nivel 1 \
+SYSTEM_PROMPT = """Eres IT-Copilot, el asistente virtual de soporte técnico de Nivel 1 \
 de NovaTech Solutions S.A.C.
 
 Se te proporcionará DOCUMENTACIÓN RELEVANTE junto con la consulta del usuario. \
 Usa esa documentación para responder.
 
-NO asumas detalles que el usuario no haya mencionado. \
-Responde solo con lo que el usuario dijo y lo que dicen los documentos.
-
 INSTRUCCIONES:
 1. Lee la documentación proporcionada.
 2. Si la documentación contiene la solución:
    - Escribe en tu respuesta los pasos COMPLETOS y NUMERADOS de la solución.
+   - Incluye las URLs, nombres de sistemas y detalles específicos que \
+     aparezcan en la documentación.
    - Luego usa 'registrar_ticket' con estado 'resuelto'.
    - Luego usa 'enviar_email' con la solución en el cuerpo del correo.
 3. Si la documentación NO contiene la solución o el problema coincide con \
@@ -74,6 +87,12 @@ REGLAS:
 - Tu respuesta SIEMPRE debe incluir los pasos detallados de la solución.
 - NUNCA digas solo "te envié un correo con los pasos". MUESTRA los pasos.
 - NUNCA inventes soluciones que no estén en la documentación.
+- NO asumas detalles que el usuario no haya mencionado. Responde solo con \
+  lo que el usuario dijo y lo que dicen los documentos.
+- Si el usuario pregunta algo que NO es de soporte TI, responde ÚNICAMENTE \
+  que solo puedes ayudar con temas de soporte técnico de NovaTech. NO \
+  proporciones la respuesta a la pregunta bajo ninguna circunstancia, ni \
+  siquiera como comentario adicional o "por si acaso".
 - Responde en español, tono profesional y amable.
 
 FORMATO DE RESPUESTA CUANDO HAY SOLUCIÓN:
@@ -87,6 +106,68 @@ FORMATO CUANDO SE ESCALA:
 - Explica brevemente por qué requiere atención especializada
 - Informa que un técnico se comunicará pronto
 """
+
+
+# ============================================================
+# PROTECCIÓN CONTRA PROMPT INJECTION
+# ============================================================
+
+PATRONES_INJECTION = [
+    r"ignora\s+(tus|las)\s+instrucciones",
+    r"ignore\s+(your|all)\s+instructions",
+    r"olvida\s+(tus|las)\s+(reglas|instrucciones)",
+    r"forget\s+(your|all)\s+(rules|instructions)",
+    r"actua\s+como\s+si",
+    r"act\s+as\s+if",
+    r"pretend\s+(you|to\s+be)",
+    r"nuevo\s+rol",
+    r"new\s+role",
+    r"eres\s+ahora",
+    r"you\s+are\s+now",
+    r"system\s*prompt",
+    r"jailbreak",
+    r"DAN\s+mode",
+    r"developer\s+mode",
+    r"modo\s+desarrollador",
+]
+
+
+def detectar_prompt_injection(texto: str) -> bool:
+    """
+    Analiza el texto del usuario para detectar intentos de
+    manipulación del prompt (prompt injection).
+
+    Args:
+        texto: Mensaje del usuario.
+
+    Returns:
+        True si se detecta un intento de injection.
+    """
+    texto_lower = texto.lower()
+    for patron in PATRONES_INJECTION:
+        if re.search(patron, texto_lower):
+            return True
+    return False
+
+
+# ============================================================
+# VALIDACIÓN DE CORREO CORPORATIVO
+# ============================================================
+
+def validar_email_corporativo(email: str) -> bool:
+    """
+    Verifica que el correo pertenezca al dominio corporativo.
+
+    Args:
+        email: Dirección de correo a validar.
+
+    Returns:
+        True si el email es válido y del dominio correcto.
+    """
+    if not email or "@" not in email:
+        return False
+    dominio = email.split("@")[1].lower().strip()
+    return dominio == DOMINIO_EMPRESA
 
 
 # ============================================================
@@ -111,11 +192,9 @@ def construir_base_vectorial() -> Chroma:
         st.error(f"No hay archivos PDF en '{DIRECTORIO_DATOS}/'.")
         st.stop()
 
-    # Cargar todos los PDFs del directorio
     loader = PyPDFDirectoryLoader(DIRECTORIO_DATOS)
     documentos = loader.load()
 
-    # Segmentar en chunks con solapamiento
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -123,7 +202,6 @@ def construir_base_vectorial() -> Chroma:
     )
     chunks = splitter.split_documents(documentos)
 
-    # Crear embeddings y almacenar en ChromaDB
     embeddings = OpenAIEmbeddings(model=MODELO_EMBEDDINGS)
     vectorstore = Chroma.from_documents(
         documents=chunks,
@@ -140,8 +218,8 @@ def construir_base_vectorial() -> Chroma:
 
 def crear_herramientas() -> list:
     """
-    Define las herramientas que el agente puede usar de forma autónoma.
-    La búsqueda RAG se realiza antes de llamar al agente, por lo que
+    Define las herramientas de acción del agente.
+    La búsqueda RAG se realiza antes de llamar al agente,
     aquí solo van las herramientas de acción.
 
     Returns:
@@ -272,46 +350,6 @@ def crear_herramientas() -> list:
 
 
 # ============================================================
-# CREACIÓN DEL AGENTE
-# ============================================================
-
-@st.cache_resource(show_spinner="Configurando agente de soporte...")
-def crear_agente(_vectorstore: Chroma) -> AgentExecutor:
-    """
-    Configura el agente con el LLM, las herramientas y el prompt del sistema.
-
-    Args:
-        _vectorstore: Base de datos vectorial (prefijo _ para que Streamlit no la hashee).
-
-    Returns:
-        AgentExecutor listo para procesar consultas.
-    """
-    herramientas = crear_herramientas()
-
-    llm = ChatOpenAI(
-        model=MODELO_LLM,
-        temperature=0.0
-    )
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-        MessagesPlaceholder("agent_scratchpad"),
-    ])
-
-    agente = create_tool_calling_agent(llm, herramientas, prompt)
-
-    return AgentExecutor(
-        agent=agente,
-        tools=herramientas,
-        verbose=False,
-        max_iterations=5,
-        handle_parsing_errors=True
-    )
-
-
-# ============================================================
 # FUNCIONES AUXILIARES DE LA INTERFAZ
 # ============================================================
 
@@ -331,17 +369,24 @@ def mostrar_sidebar():
             "https://img.icons8.com/fluency/96/technical-support.png",
             width=80
         )
-        st.title("Soporte-IT")
+        st.title("IT-Copilot")
         st.caption("Soporte TI Nivel 1 · NovaTech Solutions")
 
         st.divider()
 
-        # Campo para email del usuario
+        # Campo para email del usuario con validación visual
         email = st.text_input(
             "Tu correo corporativo",
             placeholder="nombre@novatech.com",
             key="email_usuario"
         )
+
+        # Mostrar estado de validación del email
+        if email:
+            if validar_email_corporativo(email):
+                st.success("✓ Correo válido")
+            else:
+                st.error(f"✗ Solo se permiten correos @{DOMINIO_EMPRESA}")
 
         st.divider()
 
@@ -356,34 +401,38 @@ def mostrar_sidebar():
                 estado = tk.get("estado", "desconocido")
                 if estado == "resuelto":
                     icono = "✅"
-                    color = "green"
                 elif estado == "escalado":
                     icono = "🔴"
-                    color = "red"
                 else:
                     icono = "⚪"
-                    color = "gray"
 
                 with st.expander(f"{icono} {tk['id']} - {estado.upper()}"):
                     st.write(f"**Fecha:** {tk['fecha']}")
                     st.write(f"**Usuario:** {tk['email_usuario']}")
                     st.write(f"**Resumen:** {tk['resumen']}")
                     if "razon_escalamiento" in tk:
-                        st.write(f"**Razón de escalamiento:** {tk['razon_escalamiento']}")
+                        st.write(
+                            f"**Razón de escalamiento:** "
+                            f"{tk['razon_escalamiento']}"
+                        )
 
         st.divider()
 
         # Botón para limpiar conversación
         if st.button("Nueva conversación", use_container_width=True):
             st.session_state.mensajes = []
+            st.session_state.metricas = []
             st.rerun()
-        
-        # Botón para cerrar conversación
-        if st.button("Cerrar sesión", use_container_width=True, type="secondary"):
+
+        # Botón para cerrar sesión
+        if st.button(
+            "Cerrar sesión",
+            use_container_width=True,
+            type="secondary"
+        ):
             st.session_state.clear()
             st.session_state.sesion_cerrada = True
             st.rerun()
-
 
         # Info de documentos cargados
         with st.expander("📄 Documentos cargados"):
@@ -407,6 +456,11 @@ def obtener_historial_chat() -> list:
         elif msg["role"] == "assistant":
             historial.append(AIMessage(content=msg["content"]))
     return historial
+
+
+# ============================================================
+# DASHBOARD
+# ============================================================
 
 def mostrar_dashboard():
     """Muestra métricas y gráficos basados en los tickets registrados."""
@@ -467,13 +521,64 @@ def mostrar_dashboard():
         hide_index=True
     )
 
+    st.divider()
+
+    # --- Métricas de rendimiento (costo y latencia) ---
+    st.subheader("Rendimiento del sistema")
+    metricas = st.session_state.get("metricas", [])
+
+    if metricas:
+        df_metricas = pd.DataFrame(metricas)
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+
+        tokens_total_in = df_metricas["tokens_input"].sum()
+        tokens_total_out = df_metricas["tokens_output"].sum()
+        costo_total = df_metricas["costo_usd"].sum()
+        latencia_prom = df_metricas["latencia_seg"].mean()
+
+        col_m1.metric(
+            "Tokens usados",
+            f"{tokens_total_in + tokens_total_out:,}",
+            help=f"Input: {tokens_total_in:,} | Output: {tokens_total_out:,}"
+        )
+        col_m2.metric(
+            "Costo acumulado",
+            f"${costo_total:.4f} USD"
+        )
+        col_m3.metric(
+            "Latencia promedio",
+            f"{latencia_prom:.1f} seg"
+        )
+
+        st.dataframe(
+            df_metricas[["consulta", "tokens_input", "tokens_output",
+                         "costo_usd", "latencia_seg"]].rename(
+                columns={
+                    "consulta": "Consulta",
+                    "tokens_input": "Tokens entrada",
+                    "tokens_output": "Tokens salida",
+                    "costo_usd": "Costo (USD)",
+                    "latencia_seg": "Latencia (seg)"
+                }
+            ),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info(
+            "Las métricas de costo y latencia aparecerán aquí "
+            "después de realizar consultas en el chat."
+        )
+
+
 # ============================================================
 # APLICACIÓN PRINCIPAL
 # ============================================================
 
 def main():
     st.set_page_config(
-        page_title="Soporte-IT · NovaTech Solutions",
+        page_title="IT-Copilot · NovaTech Solutions",
         page_icon="🛠️",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -493,23 +598,29 @@ def main():
         st.session_state.mensajes = []
     if "tickets" not in st.session_state:
         st.session_state.tickets = cargar_tickets_guardados()
+    if "metricas" not in st.session_state:
+        st.session_state.metricas = []
 
     # Verificar si se cerró sesión
     if st.session_state.get("sesion_cerrada"):
         st.title("👋 Sesión finalizada")
-        st.info("Gracias por usar Soporte-IT. Cierra esta pestaña o recarga la página para volver a empezar.")
+        st.info(
+            "Gracias por usar IT-Copilot. Cierra esta pestaña "
+            "o recarga la página para volver a empezar."
+        )
         st.stop()
 
     # Sidebar
     email_usuario = mostrar_sidebar()
 
-    # Construir RAG y Agente
+    # Construir RAG
     vectorstore = construir_base_vectorial()
-    agente = crear_agente(vectorstore)
 
-    # Encabezado del chat
-    st.title("🛠️ Soporte-IT")
-    st.caption("Asistente de soporte técnico Nivel 1 — NovaTech Solutions S.A.C.")
+    # Encabezado
+    st.title("🛠️ IT-Copilot")
+    st.caption(
+        "Asistente de soporte técnico Nivel 1 — NovaTech Solutions S.A.C."
+    )
 
     # Pestañas: Chat y Dashboard
     tab_chat, tab_dashboard = st.tabs(["💬 Chat", "📊 Dashboard"])
@@ -518,7 +629,7 @@ def main():
         mostrar_dashboard()
 
     with tab_chat:
-    # Mostrar historial de mensajes
+        # Mostrar historial de mensajes
         for msg in st.session_state.mensajes:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
@@ -527,29 +638,63 @@ def main():
         if not st.session_state.mensajes:
             with st.chat_message("assistant"):
                 bienvenida = (
-                    "¡Hola! Soy **Soporte-IT**, tu asistente de soporte técnico. "
-                    "Puedo ayudarte con:\n\n"
+                    "¡Hola! Soy **IT-Copilot**, tu asistente de soporte "
+                    "técnico. Puedo ayudarte con:\n\n"
                     "- 🔑 Contraseñas y desbloqueo de cuentas\n"
                     "- 🌐 Configuración de VPN\n"
                     "- 📧 Problemas con el correo electrónico\n"
                     "- 🖨️ Impresoras y periféricos\n"
                     "- 📶 Conexión Wi-Fi y red corporativa\n"
                     "- 💼 Microsoft 365 (Teams, OneDrive, SharePoint)\n\n"
-                    "Antes de empezar, asegúrate de escribir tu correo corporativo "
-                    "en el panel izquierdo. ¿En qué puedo ayudarte?"
+                    "Antes de empezar, asegúrate de escribir tu correo "
+                    "corporativo (@novatech.com) en el panel izquierdo. "
+                    "¿En qué puedo ayudarte?"
                 )
                 st.markdown(bienvenida)
 
         # Input del usuario
         if pregunta := st.chat_input("Describe tu problema técnico..."):
 
-            # Validar que el email esté configurado
-            if not email_usuario or "@" not in email_usuario:
+            # Validar que el email esté configurado y sea corporativo
+            if not email_usuario:
                 st.warning(
-                    "Por favor, ingresa tu correo corporativo en el panel "
-                    "izquierdo antes de continuar."
+                    "Por favor, ingresa tu correo corporativo en el "
+                    "panel izquierdo antes de continuar."
                 )
                 st.stop()
+
+            if not validar_email_corporativo(email_usuario):
+                st.warning(
+                    f"Solo se permiten correos del dominio "
+                    f"@{DOMINIO_EMPRESA}. Verifica tu correo en el "
+                    f"panel izquierdo."
+                )
+                st.stop()
+
+            # Verificar prompt injection
+            if detectar_prompt_injection(pregunta):
+                st.session_state.mensajes.append({
+                    "role": "user",
+                    "content": pregunta
+                })
+                with st.chat_message("user"):
+                    st.markdown(pregunta)
+
+                respuesta_seguridad = (
+                    "⚠️ He detectado que tu mensaje contiene "
+                    "instrucciones que podrían intentar modificar mi "
+                    "comportamiento. Por seguridad, no puedo procesar "
+                    "esta solicitud.\n\n"
+                    "Si tienes un problema técnico legítimo, por favor "
+                    "descríbelo normalmente y con gusto te ayudaré."
+                )
+                with st.chat_message("assistant"):
+                    st.markdown(respuesta_seguridad)
+                st.session_state.mensajes.append({
+                    "role": "assistant",
+                    "content": respuesta_seguridad
+                })
+                st.rerun()
 
             # Agregar mensaje del usuario al historial
             st.session_state.mensajes.append({
@@ -559,73 +704,166 @@ def main():
             with st.chat_message("user"):
                 st.markdown(pregunta)
 
-            # Procesar con el agente
+            # Procesar consulta
             with st.chat_message("assistant"):
-               with st.spinner("Buscando en la documentación..."):
+                with st.spinner("Buscando en la documentación..."):
                     try:
+                        # Medir latencia
+                        inicio = time.time()
+
                         # Buscar en documentos (RAG)
-                        docs = vectorstore.similarity_search(pregunta, k=4)
+                        docs = vectorstore.similarity_search(
+                            pregunta, k=TOP_K
+                        )
                         contexto = "\n\n---\n\n".join(
                             [doc.page_content for doc in docs]
                         )
 
                         consulta_enriquecida = (
-                            f"[DOCUMENTACIÓN RELEVANTE:]\n{contexto}\n\n"
-                            f"[CONSULTA DEL USUARIO:]\n{pregunta}"
+                            f"[DOCUMENTACIÓN RELEVANTE:]\n{contexto}"
+                            f"\n\n[CONSULTA DEL USUARIO:]\n{pregunta}"
                         )
 
                         # Generar respuesta con el LLM
-                        llm = ChatOpenAI(model=MODELO_LLM, temperature=0.0)
+                        llm = ChatOpenAI(
+                            model=MODELO_LLM,
+                            temperature=0.0
+                        )
                         historial = obtener_historial_chat()
 
-                        mensajes_llm = [
-                            ("system", SYSTEM_PROMPT),
-                        ]
+                        mensajes_llm = [("system", SYSTEM_PROMPT)]
                         for msg in historial:
                             if isinstance(msg, HumanMessage):
-                                mensajes_llm.append(("human", msg.content))
+                                mensajes_llm.append(
+                                    ("human", msg.content)
+                                )
                             elif isinstance(msg, AIMessage):
-                                mensajes_llm.append(("assistant", msg.content))
-                        mensajes_llm.append(("human", consulta_enriquecida))
+                                mensajes_llm.append(
+                                    ("assistant", msg.content)
+                                )
+                        mensajes_llm.append(
+                            ("human", consulta_enriquecida)
+                        )
 
                         respuesta = llm.invoke(mensajes_llm)
                         texto_respuesta = respuesta.content
+
+                        # Calcular latencia
+                        latencia = round(time.time() - inicio, 2)
+
+                        # Obtener uso de tokens
+                        tokens_in = respuesta.response_metadata.get(
+                            "token_usage", {}
+                        ).get("prompt_tokens", 0)
+                        tokens_out = respuesta.response_metadata.get(
+                            "token_usage", {}
+                        ).get("completion_tokens", 0)
+                        costo = round(
+                            (tokens_in / 1000) * COSTO_INPUT_POR_1K
+                            + (tokens_out / 1000) * COSTO_OUTPUT_POR_1K,
+                            6
+                        )
+
+                        # Guardar métricas
+                        st.session_state.metricas.append({
+                            "consulta": pregunta[:60],
+                            "tokens_input": tokens_in,
+                            "tokens_output": tokens_out,
+                            "costo_usd": costo,
+                            "latencia_seg": latencia
+                        })
+
+                        # Agregar métricas al texto de respuesta
+                        linea_metricas = (
+                            f"\n\n---\n"
+                            f"⚡ {latencia}s · "
+                            f"📊 {tokens_in + tokens_out} tokens · "
+                            f"💰 ${costo:.4f} USD"
+                        )
+                        texto_respuesta += linea_metricas
+
                         st.markdown(texto_respuesta)
 
                         # Clasificar si fue resuelto o escalado
                         clasificacion = llm.invoke([
-                            ("system", "Responde SOLO con la palabra 'resuelto' o 'escalado'."),
+                            ("system",
+                             "Responde SOLO con la palabra "
+                             "'resuelto' o 'escalado'."),
                             ("human",
                              f"Según esta respuesta de soporte TI, "
-                             f"¿el problema fue resuelto o escalado?\n\n"
-                             f"{texto_respuesta}")
+                             f"¿el problema fue resuelto o escalado?"
+                             f"\n\n{texto_respuesta}")
                         ])
                         estado = clasificacion.content.strip().lower()
 
+                        herramientas = crear_herramientas()
+
                         if "escal" in estado:
-                            escalar_resultado = crear_herramientas()[2].invoke({
+                            herramientas[2].invoke({
                                 "resumen": pregunta,
                                 "email_usuario": email_usuario,
                                 "razon": "Requiere atención de Nivel 2"
                             })
                         else:
-                            crear_herramientas()[0].invoke({
+                            herramientas[0].invoke({
                                 "resumen": pregunta,
                                 "estado": "resuelto",
                                 "email_usuario": email_usuario,
                                 "categoria": "soporte general"
                             })
-                            crear_herramientas()[1].invoke({
+                            herramientas[1].invoke({
                                 "email_usuario": email_usuario,
                                 "asunto": f"Solución: {pregunta[:50]}",
                                 "cuerpo": texto_respuesta
                             })
 
+                    except AuthenticationError:
+                        texto_respuesta = (
+                            "🔑 **Error de autenticación.** La API key "
+                            "de OpenAI no es válida o ha expirado. "
+                            "Verifica tu archivo `.env`."
+                        )
+                        st.error(texto_respuesta)
+
+                    except RateLimitError:
+                        texto_respuesta = (
+                            "⏳ **Límite de uso alcanzado.** Se agotaron "
+                            "los créditos de la API de OpenAI o se "
+                            "excedió el límite de solicitudes. Espera "
+                            "unos minutos e intenta de nuevo."
+                        )
+                        st.error(texto_respuesta)
+
+                    except APITimeoutError:
+                        texto_respuesta = (
+                            "⌛ **Tiempo de espera agotado.** El "
+                            "servidor de OpenAI tardó demasiado en "
+                            "responder. Intenta de nuevo."
+                        )
+                        st.error(texto_respuesta)
+
+                    except APIConnectionError:
+                        texto_respuesta = (
+                            "🌐 **Error de conexión.** No se pudo "
+                            "conectar con el servidor de OpenAI. "
+                            "Verifica tu conexión a internet."
+                        )
+                        st.error(texto_respuesta)
+
+                    except BadRequestError as e:
+                        texto_respuesta = (
+                            "❌ **Error en la solicitud.** La consulta "
+                            "no pudo ser procesada por el modelo. "
+                            f"Detalle: {str(e)}"
+                        )
+                        st.error(texto_respuesta)
+
                     except Exception as e:
                         texto_respuesta = (
-                            "Lo siento, ocurrió un error al procesar tu consulta. "
-                            "Por favor, intenta de nuevo o contacta a la mesa de "
-                            f"ayuda al interno 5000.\n\n*Error: {str(e)}*"
+                            "Lo siento, ocurrió un error inesperado al "
+                            "procesar tu consulta. Por favor, intenta "
+                            "de nuevo o contacta a la mesa de ayuda al "
+                            f"interno 5000.\n\n*Error: {str(e)}*"
                         )
                         st.error(texto_respuesta)
 
@@ -635,7 +873,6 @@ def main():
                 "content": texto_respuesta
             })
 
-            # Rerun para actualizar sidebar con nuevos tickets
             st.rerun()
 
 
