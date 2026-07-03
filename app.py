@@ -788,16 +788,29 @@ def main():
                         st.markdown(texto_respuesta)
 
                         # Clasificar si fue resuelto o escalado
-                        clasificacion = llm.invoke([
-                            ("system",
-                             "Responde SOLO con la palabra "
-                             "'resuelto' o 'escalado'."),
-                            ("human",
-                             f"Según esta respuesta de soporte TI, "
-                             f"¿el problema fue resuelto o escalado?"
-                             f"\n\n{texto_respuesta}")
-                        ])
-                        estado = clasificacion.content.strip().lower()
+                        # Si la respuesta tiene pasos numerados, es resuelto
+                        tiene_pasos = any(
+                            f"{i}." in texto_respuesta
+                            for i in range(1, 10)
+                        )
+                        frases_escalamiento = [
+                            "atención especializada",
+                            "técnico especializado",
+                            "equipo de nivel 2",
+                            "escalar tu caso",
+                            "derivar tu caso"
+                        ]
+                        es_escalamiento_puro = any(
+                            frase in texto_respuesta.lower()
+                            for frase in frases_escalamiento
+                        ) and not tiene_pasos
+
+                        if tiene_pasos:
+                            estado = "resuelto"
+                        elif es_escalamiento_puro:
+                            estado = "escalado"
+                        else:
+                            estado = "resuelto"
 
                         herramientas = crear_herramientas()
 
