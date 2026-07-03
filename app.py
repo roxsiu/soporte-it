@@ -4,7 +4,7 @@ IT-Copilot: Agente Inteligente de Soporte TI Nivel 1
 Sistema de resolución autónoma de tickets mediante
 arquitectura RAG y agente con herramientas (LangChain).
 
-Autores: [Nombres del equipo]
+Autores: Roxana Siu Loo - Sebastián Rodríguez
 Curso:   Proyecto Integrador - Diploma AI Engineer
 Fecha:   Julio 2026
 """
@@ -100,11 +100,14 @@ FORMATO DE RESPUESTA CUANDO HAY SOLUCIÓN:
 - Pasos numerados de la solución
 - Nota adicional si aplica
 - Mensaje de cierre
+- NUNCA menciones escalamiento ni técnicos si estás dando una solución.
+  Si tienes pasos para dar, el caso ES resuelto, no escalado.
 
 FORMATO CUANDO SE ESCALA:
 - Reconoce el problema del usuario
 - Explica brevemente por qué requiere atención especializada
 - Informa que un técnico se comunicará pronto
+- NUNCA des pasos de solución si vas a escalar. Solo escala.
 """
 
 
