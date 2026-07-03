@@ -776,16 +776,6 @@ def main():
                             "latencia_seg": latencia
                         })
 
-                        # Agregar métricas al texto de respuesta
-                        linea_metricas = (
-                            f"\n\n---\n"
-                            f"⚡ {latencia}s · "
-                            f"📊 {tokens_in + tokens_out} tokens · "
-                            f"💰 ${costo:.4f} USD"
-                        )
-                        texto_respuesta += linea_metricas
-
-                        st.markdown(texto_respuesta)
 
                         # Clasificar si fue resuelto o escalado
                         # Si la respuesta tiene pasos numerados, es resuelto
@@ -811,6 +801,17 @@ def main():
                             estado = "escalado"
                         else:
                             estado = "resuelto"
+
+                        # Agregar métricas al texto de respuesta
+                        linea_metricas = (
+                            f"\n\n---\n"
+                            f"⚡ {latencia}s · "
+                            f"📊 {tokens_in + tokens_out} tokens · "
+                            f"💰 ${costo:.4f} USD"
+                        )
+                        texto_respuesta += linea_metricas
+
+                        st.markdown(texto_respuesta)
 
                         herramientas = crear_herramientas()
 
