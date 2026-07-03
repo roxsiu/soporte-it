@@ -1,5 +1,5 @@
 """
-IT-Copilot: Agente Inteligente de Soporte TI Nivel 1
+Sara: Agente Inteligente de Soporte TI Nivel 1
 =====================================================
 Sistema de resolución autónoma de tickets mediante
 arquitectura RAG y agente con herramientas (LangChain).
@@ -64,7 +64,7 @@ Path(DIRECTORIO_TICKETS).mkdir(exist_ok=True)
 # PROMPT DEL SISTEMA
 # ============================================================
 
-SYSTEM_PROMPT = """Eres IT-Copilot, el asistente virtual de soporte técnico de Nivel 1 \
+SYSTEM_PROMPT = """Eres Sara, el asistente virtual de soporte técnico de Nivel 1 \
 de NovaTech Solutions S.A.C.
 
 Se te proporcionará DOCUMENTACIÓN RELEVANTE junto con la consulta del usuario. \
@@ -375,7 +375,7 @@ def mostrar_sidebar():
             "https://img.icons8.com/fluency/96/technical-support.png",
             width=80
         )
-        st.title("IT-Copilot")
+        st.title("Sara")
         st.caption("Soporte TI Nivel 1 · NovaTech Solutions")
 
         st.divider()
@@ -584,7 +584,7 @@ def mostrar_dashboard():
 
 def main():
     st.set_page_config(
-        page_title="IT-Copilot · NovaTech Solutions",
+        page_title="Sara · NovaTech Solutions",
         page_icon="🛠️",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -611,7 +611,7 @@ def main():
     if st.session_state.get("sesion_cerrada"):
         st.title("👋 Sesión finalizada")
         st.info(
-            "Gracias por usar IT-Copilot. Cierra esta pestaña "
+            "Gracias por usar Sara. Cierra esta pestaña "
             "o recarga la página para volver a empezar."
         )
         st.stop()
@@ -623,7 +623,7 @@ def main():
     vectorstore = construir_base_vectorial()
 
     # Encabezado
-    st.title("🛠️ IT-Copilot")
+    st.title("🛠️ Sara")
     st.caption(
         "Asistente de soporte técnico Nivel 1 — NovaTech Solutions S.A.C."
     )
@@ -644,7 +644,7 @@ def main():
         if not st.session_state.mensajes:
             with st.chat_message("assistant"):
                 bienvenida = (
-                    "¡Hola! Soy **IT-Copilot**, tu asistente de soporte "
+                    "¡Hola! Soy **Sara**, tu asistente de soporte "
                     "técnico. Puedo ayudarte con:\n\n"
                     "- 🔑 Contraseñas y desbloqueo de cuentas\n"
                     "- 🌐 Configuración de VPN\n"
