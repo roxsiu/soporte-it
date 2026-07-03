@@ -55,8 +55,8 @@ streamlit run app.py
 
 1. Clona el repositorio:
 ```bash
-git clone https://github.com/tu-usuario/it-copilot.git
-cd it-copilot
+git clone https://github.com/roxsiu/soporte-it
+cd soporte-it
 ```
 
 2. Crea un entorno virtual:
@@ -92,7 +92,7 @@ it-copilot/
 
 1. Escribe tu correo corporativo en el panel izquierdo.
 2. Describe tu problema técnico en el chat.
-3. IT-Copilot buscará en los manuales y te dará una solución paso a paso.
+3. Soporte-IT buscará en los manuales y te dará una solución paso a paso.
 4. El ticket se registrará automáticamente y podrás verlo en el panel izquierdo.
 
 ## Tecnologías
