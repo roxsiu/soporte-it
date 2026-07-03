@@ -1,4 +1,4 @@
-# 🛠️ Soporte-IT
+# 🛠️ Sara
 
 **Agente Inteligente de Soporte TI Nivel 1 mediante RAG**
 
@@ -71,7 +71,7 @@ source venv/bin/activate        # Linux/Mac
 ## Estructura del Proyecto
 
 ```
-it-copilot/
+soporte-it/
 ├── app.py              ← Aplicación principal (Streamlit + RAG + Agente)
 ├── requirements.txt    ← Dependencias de Python
 ├── .env.example        ← Plantilla para la API key
