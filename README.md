@@ -110,9 +110,3 @@ soporte-it/
 1. **Chatbots con LLM + RAG:** Pipeline de recuperación y generación de respuestas basado en documentación.
 2. **Agentes Inteligentes:** Agente con herramientas autónomas para registro de tickets, notificación por email y escalamiento.
 
-## Autores
-
-- Roxana Siu Loo
-- Sebastian Rodriguez
-
-Proyecto Integrador · Diploma AI Engineer · DMC Institute · 2026
